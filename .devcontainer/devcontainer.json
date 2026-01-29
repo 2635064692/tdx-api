@@ -1,0 +1,28 @@
+{
+  "name": "TDX-API Dev Container",
+  "dockerComposeFile": "docker-compose.dev.yml",
+  "service": "dev",
+  "workspaceFolder": "/app/tdx-api",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go",
+        "mutantdino.resourcemonitor"
+      ],
+      "settings": {
+        "go.goroot": "/usr/local/go",
+        "go.gopath": "/go",
+        "go.toolsManagement.autoUpdate": true,
+        "go.useLanguageServer": true,
+        "go.autocompleteUnimportedPackages": true,
+        "go.gotoSymbol.includeImports": true,
+        "[go]": {
+          "editor.formatOnSave": true,
+          "editor.defaultFormatter": "golang.go"
+        }
+      }
+    }
+  },
+  "postStartCommand": "go install github.com/go-delve/delve/cmd/dlv@latest",
+  "remoteUser": "root"
+}

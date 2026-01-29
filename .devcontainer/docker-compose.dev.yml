@@ -1,0 +1,25 @@
+services:
+  dev:
+    image: golang:1.23
+    container_name: go-dev-container
+    volumes:
+      - ..:/app/tdx-api:cached
+      - go-mod-cache:/go/pkg/mod
+    working_dir: /app/tdx-api
+    environment:
+      - TZ=Asia/Shanghai
+      - GO111MODULE=on
+      - GOPROXY=https://goproxy.cn,direct
+    ports:
+      - "8080:8080"
+      - "2345:2345"
+    command: sleep infinity
+    networks:
+      - dev-network
+
+volumes:
+  go-mod-cache:
+
+networks:
+  dev-network:
+    driver: bridge

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__auggie-mcp__codebase-retrieval",
+      "Bash(docker exec:*)",
+      "Bash(go version)"
+    ]
+  }
+}

@@ -111,6 +111,25 @@ ws://localhost:8080/ws/quote
 - `codes` 仅支持明确的 6 位股票代码；不支持 `*` / `sh:*` 等全量订阅语法。
 - 服务端响应 `type`：`pong` / `snapshot` / `delta` / `error`。
 
+快速验证（wscat）：
+
+```bash
+# 若未安装：npm i -g wscat
+wscat -c ws://localhost:8080/ws/quote
+
+# 心跳
+> {"action":"ping"}
+
+# 订阅
+> {"action":"subscribe","codes":["000001"]}
+
+# 退订
+> {"action":"unsubscribe","codes":["000001"]}
+
+# 非法订阅（应返回 type=error）
+> {"action":"subscribe","codes":["*"]}
+```
+
 ### 获取K线数据
 ```
 GET /api/kline?code=000001&type=day

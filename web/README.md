@@ -92,6 +92,25 @@ go run server.go
 GET /api/quote?code=000001
 ```
 
+### WebSocket 五档推送（500ms）
+
+```
+ws://localhost:8080/ws/quote
+```
+
+客户端消息（JSON）：
+
+```json
+{"action":"subscribe","codes":["000001","600000"]}
+{"action":"unsubscribe","codes":["000001"]}
+{"action":"ping"}
+```
+
+说明：
+
+- `codes` 仅支持明确的 6 位股票代码；不支持 `*` / `sh:*` 等全量订阅语法。
+- 服务端响应 `type`：`pong` / `snapshot` / `delta` / `error`。
+
 ### 获取K线数据
 ```
 GET /api/kline?code=000001&type=day
@@ -185,4 +204,3 @@ A: 修改 `server.go` 中的 `port` 变量即可。
 ## 联系方式
 
 如有问题或建议，请在GitHub上提交Issue。
-

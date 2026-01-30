@@ -708,6 +708,9 @@ func main() {
 	// 静态文件服务
 	http.Handle("/", http.FileServer(http.Dir("./static")))
 
+	// WebSocket路由
+	http.HandleFunc("/ws/quote", handleWSQuote)
+
 	// API路由
 	http.HandleFunc("/api/quote", handleGetQuote)
 	http.HandleFunc("/api/kline", handleGetKline)

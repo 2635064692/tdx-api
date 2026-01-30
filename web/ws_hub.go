@@ -131,6 +131,23 @@ func (h *QuoteHub) Unsubscribe(c *WSClient, codes []string) {
 	}
 }
 
+func (h *QuoteHub) ClientCodes(c *WSClient) []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	set, ok := h.clientCodes[c]
+	if !ok {
+		return nil
+	}
+
+	codes := make([]string, 0, len(set))
+	for code := range set {
+		codes = append(codes, code)
+	}
+	sort.Strings(codes)
+	return codes
+}
+
 func (h *QuoteHub) Snapshot() (map[*WSClient][]string, []string) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()

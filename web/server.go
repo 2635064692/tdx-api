@@ -710,6 +710,7 @@ func main() {
 
 	// WebSocket路由
 	http.HandleFunc("/ws/quote", handleWSQuote)
+	http.HandleFunc("/ws/mock/quote", handleWSMockQuote)
 
 	// API路由
 	http.HandleFunc("/api/quote", handleGetQuote)
@@ -745,6 +746,7 @@ func main() {
 	http.HandleFunc("/api/tasks/", handleTaskOperations)
 
 	startQuotePusher()
+	startMockQuotePusher()
 
 	port := ":8080"
 	log.Printf("服务启动成功，访问 http://localhost%s\n", port)

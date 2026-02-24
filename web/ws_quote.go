@@ -162,29 +162,176 @@ func normalizeStockCodes(codes []string) ([]string, error) {
 		return nil, fmt.Errorf("codes is required")
 	}
 	if len(codes) > 200 {
-		return nil, fmt.Errorf("too many codes")
+		return nil, fmt.Errorf("too many input patterns (max 200)")
 	}
 
-	set := make(map[string]struct{}, len(codes))
-	out := make([]string, 0, len(codes))
+	set := make(map[string]struct{})
+	out := make([]string, 0)
 
 	for _, raw := range codes {
-		code := strings.TrimSpace(raw)
-		if code == "" {
+		pattern := strings.TrimSpace(raw)
+		if pattern == "" {
 			return nil, fmt.Errorf("code is empty")
 		}
-		if code == "*" || strings.Contains(code, ":") {
-			return nil, fmt.Errorf("unsupported code syntax")
+
+		expanded, err := expandWildcardPattern(pattern)
+		if err != nil {
+			return nil, err
 		}
-		if !wsCodeRe.MatchString(code) {
-			return nil, fmt.Errorf("invalid code format")
+
+		for _, code := range expanded {
+			if _, ok := set[code]; !ok {
+				set[code] = struct{}{}
+				out = append(out, code)
+			}
 		}
-		if _, ok := set[code]; ok {
-			continue
-		}
-		set[code] = struct{}{}
-		out = append(out, code)
+	}
+
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no valid codes matched")
+	}
+	if len(out) > 2000 {
+		return nil, fmt.Errorf("too many codes after expansion (limit 2000, got %d)", len(out))
 	}
 
 	return out, nil
+}
+
+func expandWildcardPattern(pattern string) ([]string, error) {
+	if strings.Contains(pattern, "*") {
+		return expandWildcard(pattern)
+	}
+
+	if strings.Contains(pattern, ":") {
+		return expandExchangePattern(pattern)
+	}
+
+	if wsCodeRe.MatchString(pattern) {
+		fullCode := protocol.AddPrefix(pattern)
+		if manager.Codes.Get(fullCode) != nil {
+			return []string{pattern}, nil
+		}
+		return nil, fmt.Errorf("code %s not found", pattern)
+	}
+
+	return nil, fmt.Errorf("invalid pattern: %s", pattern)
+}
+
+func expandWildcard(pattern string) ([]string, error) {
+	var exchange, codePattern string
+
+	if strings.Contains(pattern, ":") {
+		parts := strings.SplitN(pattern, ":", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid exchange pattern: %s", pattern)
+		}
+		exchange = strings.ToLower(strings.TrimSpace(parts[0]))
+		codePattern = strings.TrimSpace(parts[1])
+
+		if exchange != "sh" && exchange != "sz" && exchange != "bj" {
+			return nil, fmt.Errorf("invalid exchange: %s", exchange)
+		}
+	} else {
+		codePattern = pattern
+	}
+
+	if codePattern == "*" {
+		if exchange == "" {
+			return nil, fmt.Errorf("exchange required for full wildcard (*)")
+		}
+		return getStocksByExchange(exchange), nil
+	}
+
+	prefix := strings.TrimSuffix(codePattern, "*")
+	if len(prefix) == 0 || len(prefix) > 6 {
+		return nil, fmt.Errorf("invalid wildcard pattern: %s", pattern)
+	}
+
+	if !regexp.MustCompile(`^[0-9]+$`).MatchString(prefix) {
+		return nil, fmt.Errorf("wildcard prefix must be numeric: %s", prefix)
+	}
+
+	return matchCodesByPrefix(exchange, prefix), nil
+}
+
+func expandExchangePattern(pattern string) ([]string, error) {
+	parts := strings.SplitN(pattern, ":", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid exchange pattern: %s", pattern)
+	}
+
+	exchange := strings.ToLower(strings.TrimSpace(parts[0]))
+	code := strings.TrimSpace(parts[1])
+
+	if exchange != "sh" && exchange != "sz" && exchange != "bj" {
+		return nil, fmt.Errorf("invalid exchange: %s", exchange)
+	}
+
+	if !wsCodeRe.MatchString(code) {
+		return nil, fmt.Errorf("invalid code format: %s", code)
+	}
+
+	fullCode := exchange + code
+	if manager.Codes.Get(fullCode) != nil {
+		return []string{code}, nil
+	}
+
+	return nil, fmt.Errorf("code %s not found in exchange %s", code, exchange)
+}
+
+func getStocksByExchange(exchange string) []string {
+	result := make([]string, 0)
+	for fullCode, model := range manager.Codes.Map {
+		if model.Exchange != exchange {
+			continue
+		}
+		if protocol.IsStock(fullCode) {
+			result = append(result, model.Code)
+		}
+	}
+	return result
+}
+
+func matchCodesByPrefix(exchange, prefix string) []string {
+	result := make([]string, 0)
+
+	if exchange != "" {
+		for fullCode, model := range manager.Codes.Map {
+			if model.Exchange != exchange {
+				continue
+			}
+			if strings.HasPrefix(model.Code, prefix) && protocol.IsStock(fullCode) {
+				result = append(result, model.Code)
+			}
+		}
+	} else {
+		inferredExchange := inferExchangeFromPrefix(prefix)
+		for fullCode, model := range manager.Codes.Map {
+			if inferredExchange != "" && model.Exchange != inferredExchange {
+				continue
+			}
+			if strings.HasPrefix(model.Code, prefix) && protocol.IsStock(fullCode) {
+				result = append(result, model.Code)
+			}
+		}
+	}
+
+	return result
+}
+
+func inferExchangeFromPrefix(prefix string) string {
+	if len(prefix) == 0 {
+		return ""
+	}
+	first := prefix[0]
+	if first == '6' {
+		return "sh"
+	}
+	if first == '0' || (len(prefix) >= 2 && prefix[:2] == "30") {
+		return "sz"
+	}
+	if first == '8' || (len(prefix) >= 2 && (prefix[:2] == "92" || prefix[:2] == "43")) {
+		return "bj"
+	}
+	return ""
 }

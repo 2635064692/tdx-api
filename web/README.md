@@ -44,6 +44,20 @@ cd web
 go run server.go
 ```
 
+#### 启动超时配置（可选）
+
+首次启动时会拉取股票代码库/交易日等数据，网络波动可能导致请求超时。可通过环境变量调整等待超时：
+
+```bash
+# 支持 Go duration（推荐）：60s / 2m / 180s ...
+TDX_WAIT_TIMEOUT=180s go run server.go
+
+# 也支持纯数字秒：例如 180 表示 180s
+TDX_WAIT_TIMEOUT=180 go run server.go
+```
+
+默认 `TDX_WAIT_TIMEOUT=60s`。
+
 4. **访问应用**
 
 打开浏览器访问：`http://localhost:8080`

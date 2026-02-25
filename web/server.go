@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,13 +23,35 @@ var (
 	taskManager = NewTaskManager()
 )
 
+func getWaitTimeout() time.Duration {
+	// Default 60s to avoid startup failures on slow/unstable TDX endpoints.
+	const def = 60 * time.Second
+
+	v := strings.TrimSpace(os.Getenv("TDX_WAIT_TIMEOUT"))
+	if v == "" {
+		return def
+	}
+	if d, err := time.ParseDuration(v); err == nil && d > 0 {
+		return d
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+
+	log.Printf("invalid TDX_WAIT_TIMEOUT=%q, fallback to %s", v, def)
+	return def
+}
+
 func init() {
 	var err error
+	waitTimeout := getWaitTimeout()
+
 	// 连接通达信服务器
 	client, err = tdx.DialDefault(tdx.WithDebug(false))
 	if err != nil {
 		log.Fatalf("连接服务器失败: %v", err)
 	}
+	client.Wait.SetTimeout(waitTimeout)
 	log.Println("成功连接到通达信服务器")
 
 	// 初始化代码缓存
@@ -47,7 +70,8 @@ func init() {
 	}
 
 	manager, err = tdx.NewManage(&tdx.ManageConfig{
-		Number: 4,
+		Number:      4,
+		WaitTimeout: waitTimeout,
 	})
 	if err != nil {
 		log.Fatalf("初始化数据管理器失败: %v", err)

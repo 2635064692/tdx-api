@@ -195,7 +195,12 @@ func (this *Client) SendFrame(f *protocol.Frame, cache ...any) (any, error) {
 	if _, err := this.Client.Write(f.Bytes()); err != nil {
 		return nil, err
 	}
-	return this.Wait.Wait(conv.String(f.MsgID))
+	result, err := this.Wait.Wait(conv.String(f.MsgID))
+	if err != nil {
+		logs.Warnf("[tdx] 请求超时(msgID=%d), 关闭连接触发重连", f.MsgID)
+		this.Client.Close()
+	}
+	return result, err
 }
 
 // GetCount 获取市场内的股票数量

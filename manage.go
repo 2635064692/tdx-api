@@ -31,7 +31,11 @@ func NewManageMysql(cfg *ManageConfig, op ...client.Option) (*Manage, error) {
 	if err != nil {
 		return nil, err
 	}
-	commonClient.Wait.SetTimeout(time.Second * 5)
+	waitTimeout := cfg.WaitTimeout
+	if waitTimeout <= 0 {
+		waitTimeout = 5 * time.Second
+	}
+	commonClient.Wait.SetTimeout(waitTimeout)
 
 	//代码管理
 	codes, err := NewCodesMysql(commonClient, cfg.CodesFilename)
@@ -47,7 +51,12 @@ func NewManageMysql(cfg *ManageConfig, op ...client.Option) (*Manage, error) {
 
 	//连接池
 	p, err := NewPool(func() (*Client, error) {
-		return cfg.Dial(op...)
+		c, err := cfg.Dial(op...)
+		if err != nil {
+			return nil, err
+		}
+		c.Wait.SetTimeout(waitTimeout)
+		return c, nil
 	}, cfg.Number)
 	if err != nil {
 		return nil, err
@@ -82,7 +91,11 @@ func NewManage(cfg *ManageConfig, op ...client.Option) (*Manage, error) {
 	if err != nil {
 		return nil, err
 	}
-	commonClient.Wait.SetTimeout(time.Second * 5)
+	waitTimeout := cfg.WaitTimeout
+	if waitTimeout <= 0 {
+		waitTimeout = 5 * time.Second
+	}
+	commonClient.Wait.SetTimeout(waitTimeout)
 
 	//代码管理
 	codes, err := NewCodesSqlite(commonClient, cfg.CodesFilename)
@@ -98,7 +111,12 @@ func NewManage(cfg *ManageConfig, op ...client.Option) (*Manage, error) {
 
 	//连接池
 	p, err := NewPool(func() (*Client, error) {
-		return cfg.Dial(op...)
+		c, err := cfg.Dial(op...)
+		if err != nil {
+			return nil, err
+		}
+		c.Wait.SetTimeout(waitTimeout)
+		return c, nil
 	}, cfg.Number)
 	if err != nil {
 		return nil, err
@@ -149,4 +167,5 @@ type ManageConfig struct {
 	CodesFilename   string                                             //代码数据库位置
 	WorkdayFileName string                                             //工作日数据库位置
 	Dial            func(op ...client.Option) (cli *Client, err error) //默认连接方式
+	WaitTimeout     time.Duration                                      //请求等待超时(默认5s)
 }

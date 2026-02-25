@@ -63,7 +63,7 @@ func (p *QuotePusher) tick() {
 
 	quotes, err := fetchQuotesBatched(union)
 	if err != nil {
-		log.Printf("ws quote fetch failed: %v", err)
+		log.Printf("[ws/quote] pusher fetch failed: codes=%d %v", len(union), err)
 		return
 	}
 

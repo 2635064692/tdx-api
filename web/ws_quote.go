@@ -47,9 +47,12 @@ type wsServerMessage struct {
 func handleWSQuote(w http.ResponseWriter, r *http.Request) {
 	conn, err := wsQuoteUpgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("ws upgrade failed: %v", err)
+		log.Printf("[ws/quote] upgrade failed: %s %v", r.RemoteAddr, err)
 		return
 	}
+
+	addr := conn.RemoteAddr().String()
+	log.Printf("[ws/quote] connected: %s", addr)
 
 	wsClient := NewWSClient(conn)
 	quoteHub.Register(wsClient)
@@ -59,10 +62,12 @@ func handleWSQuote(w http.ResponseWriter, r *http.Request) {
 }
 
 func wsQuoteReadPump(c *WSClient) {
+	addr := c.conn.RemoteAddr().String()
 	defer func() {
 		quoteHub.Unregister(c)
 		c.CloseSend()
 		_ = c.conn.Close()
+		log.Printf("[ws/quote] disconnected: %s", addr)
 	}()
 
 	c.conn.SetReadLimit(64 * 1024)
@@ -70,11 +75,15 @@ func wsQuoteReadPump(c *WSClient) {
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				log.Printf("[ws/quote] read error: %s %v", addr, err)
+			}
 			return
 		}
 
 		var req wsClientMessage
 		if err := json.Unmarshal(message, &req); err != nil {
+			log.Printf("[ws/quote] invalid json: %s", addr)
 			wsSendError(c, 1000, "invalid json")
 			continue
 		}
@@ -86,28 +95,35 @@ func wsQuoteReadPump(c *WSClient) {
 		case "subscribe":
 			codes, err := normalizeStockCodes(req.Codes)
 			if err != nil {
+				log.Printf("[ws/quote] subscribe rejected: %s %v", addr, err)
 				wsSendError(c, 1001, err.Error())
 				continue
 			}
+			log.Printf("[ws/quote] subscribe: %s codes=%d", addr, len(codes))
 			quoteHub.Subscribe(c, codes)
 			wsSendSnapshot(c)
 		case "unsubscribe":
 			codes, err := normalizeStockCodes(req.Codes)
 			if err != nil {
+				log.Printf("[ws/quote] unsubscribe rejected: %s %v", addr, err)
 				wsSendError(c, 1002, err.Error())
 				continue
 			}
+			log.Printf("[ws/quote] unsubscribe: %s codes=%d", addr, len(codes))
 			quoteHub.Unsubscribe(c, codes)
 		default:
+			log.Printf("[ws/quote] unknown action: %s action=%q", addr, action)
 			wsSendError(c, 1003, "invalid action")
 		}
 	}
 }
 
 func wsQuoteWritePump(c *WSClient) {
+	addr := c.conn.RemoteAddr().String()
 	for msg := range c.send {
 		_ = c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 		if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+			log.Printf("[ws/quote] write error: %s %v", addr, err)
 			return
 		}
 	}
@@ -128,6 +144,7 @@ func wsSendSnapshot(c *WSClient) {
 
 	quotes, err := client.GetQuote(codes...)
 	if err != nil {
+		log.Printf("[ws/quote] snapshot fetch failed: %s codes=%d %v", c.conn.RemoteAddr(), len(codes), err)
 		wsSendError(c, 2001, fmt.Sprintf("get quote failed: %v", err))
 		return
 	}

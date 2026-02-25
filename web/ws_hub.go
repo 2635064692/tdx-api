@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"sort"
 	"sync"
 
@@ -32,6 +33,7 @@ func (c *WSClient) TrySend(msg []byte) bool {
 	case c.send <- msg:
 		return true
 	default:
+		log.Printf("[ws/quote] send buffer full, dropped: %s", c.conn.RemoteAddr())
 		return false
 	}
 }

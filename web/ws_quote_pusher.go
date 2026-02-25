@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	wsQuoteInterval         = 500 * time.Millisecond
+	wsQuoteInterval         = 1000 * time.Millisecond
 	wsQuoteSnapshotInterval = 30 * time.Second
 	wsQuoteBatchSize        = 80
 )

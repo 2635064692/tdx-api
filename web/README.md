@@ -106,13 +106,15 @@ TDX_WAIT_TIMEOUT=180 go run server.go
 GET /api/quote?code=000001
 ```
 
-### WebSocket 五档推送（500ms）
+### WebSocket 五档推送
 
 ```
 ws://localhost:8080/ws/quote
 ```
 
-客户端消息（JSON）：
+推送频率固定 1s，服务端响应 `type`：`pong` / `snapshot` / `delta` / `error`。
+
+#### 客户端消息
 
 ```json
 {"action":"subscribe","codes":["000001","600000"]}
@@ -120,12 +122,27 @@ ws://localhost:8080/ws/quote
 {"action":"ping"}
 ```
 
-说明：
+#### 通配符订阅
 
-- `codes` 仅支持明确的 6 位股票代码；不支持 `*` / `sh:*` 等全量订阅语法。
-- 服务端响应 `type`：`pong` / `snapshot` / `delta` / `error`。
+`codes` 支持 **前缀 + `*`** 尾部通配，订阅时自动展开为匹配的股票代码（仅股票，不含 ETF/指数）。
 
-快速验证（wscat）：
+| 模式 | 含义 | 示例 |
+|------|------|------|
+| `sh:*` | 指定交易所全部股票 | 上交所所有股票 |
+| `sh:60*` | 交易所 + 代码前缀 | 上交所 60 开头 |
+| `60*` | 仅代码前缀（自动推断交易所） | 等价于 `sh:60*` |
+| `sh:000001` | 交易所 + 精确代码 | 上交所精确匹配 |
+| `000001` | 纯 6 位代码 | 自动推断交易所 |
+
+交易所自动推断规则：`6xx→sh`、`0xx/30x→sz`、`8xx/92x/43x→bj`。
+
+约束：
+- 裸 `*` 不允许，必须指定交易所（如 `sh:*`）
+- 通配前缀必须为纯数字，长度 1-6
+- 交易所仅支持 `sh` / `sz` / `bj`
+- 输入 patterns 上限 200 个，展开后 codes 上限 2000 个
+
+#### 快速验证（wscat）
 
 ```bash
 # 若未安装：npm i -g wscat
@@ -134,13 +151,19 @@ wscat -c ws://localhost:8080/ws/quote
 # 心跳
 > {"action":"ping"}
 
-# 订阅
+# 精确订阅
 > {"action":"subscribe","codes":["000001"]}
+
+# 通配符订阅
+> {"action":"subscribe","codes":["sh:60*","sz:30*"]}
+
+# 混合订阅
+> {"action":"subscribe","codes":["000001","bj:*"]}
 
 # 退订
 > {"action":"unsubscribe","codes":["000001"]}
 
-# 非法订阅（应返回 type=error）
+# 非法（裸通配，应返回 type=error）
 > {"action":"subscribe","codes":["*"]}
 ```
 

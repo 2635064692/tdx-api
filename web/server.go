@@ -83,6 +83,7 @@ func init() {
 		log.Printf("更新交易日数据失败: %v", err)
 	}
 	manager.Cron.Start()
+	initQuoteStorageSystem()
 }
 
 // Response 统一响应结构
@@ -768,6 +769,12 @@ func main() {
 	http.HandleFunc("/api/tasks/pull-trade", handleCreatePullTradeTask)
 	http.HandleFunc("/api/tasks", handleListTasks)
 	http.HandleFunc("/api/tasks/", handleTaskOperations)
+	http.HandleFunc("/api/quote-storage/status", handleQuoteStorageStatus)
+	http.HandleFunc("/api/quote-storage/start", handleQuoteStorageStart)
+	http.HandleFunc("/api/quote-storage/stop", handleQuoteStorageStop)
+	http.HandleFunc("/api/quote-storage/stats", handleQuoteStorageStats)
+	http.HandleFunc("/api/quote-storage/archival", handleQuoteStorageArchival)
+	http.HandleFunc("/api/quote-storage/tasks", handleQuoteStorageTasks)
 
 	startQuotePusher()
 	startMockQuotePusher()

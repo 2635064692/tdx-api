@@ -151,6 +151,10 @@ func (s *QuoteStorageSystem) Status() SystemStatus {
 	return status
 }
 
+func (s *QuoteStorageSystem) ReportError(err error) {
+	s.setLastError(err)
+}
+
 func (s *QuoteStorageSystem) UpdateConfig(cfg QuoteSubscriptionConfig) error {
 	s.onConfigChange(cfg)
 	return nil

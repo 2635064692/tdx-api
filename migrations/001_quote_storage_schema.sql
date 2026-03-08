@@ -1,0 +1,1 @@
+-- Quote storage schema placeholder. Filled in later issue steps.

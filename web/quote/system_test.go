@@ -38,3 +38,11 @@ func TestDrainReturnsOnEmptyQueue(t *testing.T) {
 		t.Fatalf("Drain returned error: %v", err)
 	}
 }
+
+func TestSystemReportErrorUpdatesStatus(t *testing.T) {
+	system := NewQuoteStorageSystem(nil, SystemDependencies{})
+	system.ReportError(context.DeadlineExceeded)
+	if status := system.Status(); status.LastError == "" {
+		t.Fatalf("expected last error to be reported")
+	}
+}

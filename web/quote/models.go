@@ -3,6 +3,8 @@ package quote
 import (
 	"sync/atomic"
 	"time"
+
+	"github.com/injoyai/tdx/protocol"
 )
 
 const (
@@ -61,6 +63,27 @@ type QuoteTick struct {
 	BidVols    [5]int    `json:"bid_vols"`
 	AskPrices  [5]int    `json:"ask_prices"`
 	AskVols    [5]int    `json:"ask_vols"`
+}
+
+func NewQuoteTick(q *protocol.Quote, seq uint64, now time.Time) QuoteTick {
+	tick := QuoteTick{
+		Code:       q.Code,
+		Exchange:   q.Exchange.String(),
+		TradeDate:  time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()),
+		EventTs:    now.UnixMilli(),
+		Seq:        seq,
+		Volume:     int64(q.TotalHand),
+		Amount:     q.Amount,
+		InsideVol:  q.InsideDish,
+		OutsideVol: q.OuterDisc,
+	}
+	for i := 0; i < 5; i++ {
+		tick.BidPrices[i] = int(q.BuyLevel[i].Price)
+		tick.BidVols[i] = q.BuyLevel[i].Number
+		tick.AskPrices[i] = int(q.SellLevel[i].Price)
+		tick.AskVols[i] = q.SellLevel[i].Number
+	}
+	return tick
 }
 
 type QuoteTickRealtime struct {

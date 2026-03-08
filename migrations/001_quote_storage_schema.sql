@@ -5,18 +5,14 @@ CREATE TABLE IF NOT EXISTS sys_config (
     update_ts BIGINT NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-INSERT INTO sys_config (config_key, config_value, remark, update_ts)
+INSERT IGNORE INTO sys_config (config_key, config_value, remark, update_ts)
 VALUES
     ('QUOTE_WS_SUBSCRIBE_CODES', '603*', 'quote storage subscribe code patterns', UNIX_TIMESTAMP(NOW(3)) * 1000),
     ('QUOTE_WS_TRADE_SESSIONS', '09:15-11:30,13:00-15:00', 'quote storage trade sessions', UNIX_TIMESTAMP(NOW(3)) * 1000),
     ('QUOTE_STORAGE_ENABLED', '0', 'quote storage enable switch', UNIX_TIMESTAMP(NOW(3)) * 1000),
     ('QUOTE_STORAGE_SOURCE', 'real', 'quote storage source: real or mock', UNIX_TIMESTAMP(NOW(3)) * 1000),
     ('QUOTE_STORAGE_BATCH_SIZE', '1000', 'quote storage batch size', UNIX_TIMESTAMP(NOW(3)) * 1000),
-    ('QUOTE_STORAGE_FLUSH_INTERVAL_MS', '5000', 'quote storage flush interval milliseconds', UNIX_TIMESTAMP(NOW(3)) * 1000)
-ON DUPLICATE KEY UPDATE
-    config_value = VALUES(config_value),
-    remark = VALUES(remark),
-    update_ts = VALUES(update_ts);
+    ('QUOTE_STORAGE_FLUSH_INTERVAL_MS', '5000', 'quote storage flush interval milliseconds', UNIX_TIMESTAMP(NOW(3)) * 1000);
 
 CREATE TABLE IF NOT EXISTS quote_tick_realtime (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

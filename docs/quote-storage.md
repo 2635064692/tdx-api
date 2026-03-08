@@ -5,6 +5,7 @@
 ### 环境变量
 
 - `QUOTE_STORAGE_MYSQL_DSN`：MySQL 连接串；未配置时主服务仍启动，但行情存储接口会返回“未就绪”。
+  - 验证环境示例：`root:infini_rag_flow@tcp(192.168.144.3:3306)/vnpy?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai`
 - `TDX_WAIT_TIMEOUT`：沿用现有 TDX 超时配置。
 
 ### sys_config 配置项
@@ -29,6 +30,8 @@ mysql "$QUOTE_STORAGE_MYSQL_DSN" -e "SHOW INDEX FROM quote_tick_history"
 ```
 
 预期检查点：
+
+- 迁移只初始化缺失的 `sys_config` 默认项，不覆盖已存在的业务配置值。
 
 - `quote_tick_realtime` 存在 `uk_code_event_seq(code,event_ts,seq)`。
 - `quote_tick_history` 存在 `uk_code_trade_date(code,trade_date)`。

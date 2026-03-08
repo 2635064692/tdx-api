@@ -59,15 +59,14 @@ func NewConfigPoller(db *xorm.Engine, interval time.Duration, onChange func(Quot
 	if interval <= 0 {
 		interval = DefaultPollInterval
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	return &ConfigPoller{
+	poller := &ConfigPoller{
 		db:            db,
 		interval:      interval,
 		currentConfig: DefaultConfig(),
 		onChange:      onChange,
-		ctx:           ctx,
-		cancel:        cancel,
 	}
+	poller.resetContext()
+	return poller
 }
 
 func (p *ConfigPoller) Start() error {
@@ -79,21 +78,24 @@ func (p *ConfigPoller) Start() error {
 		p.mu.Unlock()
 		return nil
 	}
+	p.resetContext()
+	ctx := p.ctx
 	p.started = true
 	p.mu.Unlock()
 	if err := p.Poll(); err != nil {
+		p.Stop()
 		return err
 	}
-	go p.run()
+	go p.run(ctx)
 	return nil
 }
 
-func (p *ConfigPoller) run() {
+func (p *ConfigPoller) run(ctx context.Context) {
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-p.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			if err := p.Poll(); err != nil {
@@ -104,8 +106,14 @@ func (p *ConfigPoller) run() {
 }
 
 func (p *ConfigPoller) Stop() {
-	if p.cancel != nil {
-		p.cancel()
+	p.mu.Lock()
+	p.started = false
+	cancel := p.cancel
+	p.cancel = nil
+	p.ctx = nil
+	p.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 }
 
@@ -129,6 +137,13 @@ func (p *ConfigPoller) Current() QuoteSubscriptionConfig {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.currentConfig.Clone()
+}
+
+func (p *ConfigPoller) resetContext() {
+	if p.cancel != nil {
+		p.cancel()
+	}
+	p.ctx, p.cancel = context.WithCancel(context.Background())
 }
 
 func (p *ConfigPoller) loadRows() ([]map[string]string, error) {

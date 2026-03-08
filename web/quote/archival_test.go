@@ -3,6 +3,7 @@ package quote
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 
@@ -69,6 +70,72 @@ func TestArchivalTaskIsIdempotent(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("expected one history row after repeat archival, got %d", count)
+	}
+}
+
+func TestCompressLevelsUsesPriceAggregation(t *testing.T) {
+	rows := []QuoteTickRealtime{
+		quoteRowAt(1000, 10, []priceLevel{{Price: 1000, Number: 10}, {Price: 999, Number: 9}}, nil),
+		quoteRowAt(2000, 10, []priceLevel{{Price: 1001, Number: 8}, {Price: 1000, Number: 10}}, nil),
+	}
+
+	buyLevels := compressLevels(rows, true)
+	if len(buyLevels) != 3 {
+		t.Fatalf("expected 3 aggregated buy levels, got %d", len(buyLevels))
+	}
+
+	level1000 := mustLevel(t, buyLevels, 1000)
+	if !slices.Equal(level1000.Number, []int{10, -119}) {
+		t.Fatalf("expected price 1000 to be aggregated by price with same marker, got %v", level1000.Number)
+	}
+	if level1000.Ts != 1000 {
+		t.Fatalf("expected first ts 1000, got %d", level1000.Ts)
+	}
+}
+
+func TestCompressLevelsDistinguishesSameAndGapRanges(t *testing.T) {
+	rows := []QuoteTickRealtime{
+		quoteRowAt(1000, 10, []priceLevel{{Price: 1000, Number: 10}, {Price: 999, Number: 9}}, nil),
+		quoteRowAt(2000, 10, []priceLevel{{Price: 1000, Number: 10}}, nil),
+		quoteRowAt(3000, 10, []priceLevel{{Price: 1000, Number: 10}}, nil),
+		quoteRowAt(4000, 10, []priceLevel{{Price: 1001, Number: 8}}, nil),
+		quoteRowAt(5000, 10, []priceLevel{{Price: 1001, Number: 8}}, nil),
+	}
+
+	buyLevels := compressLevels(rows, true)
+
+	sameLevel := mustLevel(t, buyLevels, 1000)
+	if !slices.Equal(sameLevel.Number, []int{10, -118, -2}) {
+		t.Fatalf("expected same-run then gap marker for price 1000, got %v", sameLevel.Number)
+	}
+	assertSameGapRanges(t, sameLevel.Number)
+
+	gapLevel := mustLevel(t, buyLevels, 999)
+	if !slices.Equal(gapLevel.Number, []int{9, -4}) {
+		t.Fatalf("expected compressed gap range for price 999, got %v", gapLevel.Number)
+	}
+	assertSameGapRanges(t, gapLevel.Number)
+}
+
+func TestAggregateQuoteTicksKeepsNegativeMarkersAboveMinus120(t *testing.T) {
+	rows := []QuoteTickRealtime{
+		quoteRowAt(1000, 10, []priceLevel{{Price: 1000, Number: 10}, {Price: 999, Number: 9}}, []priceLevel{{Price: 1001, Number: 20}}),
+		quoteRowAt(2000, 12, []priceLevel{{Price: 1000, Number: 10}}, []priceLevel{{Price: 1001, Number: 20}, {Price: 1002, Number: 18}}),
+		quoteRowAt(3000, 14, []priceLevel{{Price: 1000, Number: 10}}, []priceLevel{{Price: 1002, Number: 18}}),
+		quoteRowAt(4000, 16, []priceLevel{{Price: 1003, Number: 7}}, []priceLevel{{Price: 1002, Number: 18}}),
+	}
+
+	history, err := aggregateQuoteTicks(rows)
+	if err != nil {
+		t.Fatalf("aggregateQuoteTicks returned error: %v", err)
+	}
+
+	var payload archivalPayload
+	if err := json.Unmarshal([]byte(history.QuoteTicks), &payload); err != nil {
+		t.Fatalf("unmarshal payload failed: %v", err)
+	}
+	for _, level := range append(append([]compressedLevel{}, payload.BuyLevel...), payload.SellLevel...) {
+		assertSameGapRanges(t, level.Number)
 	}
 }
 
@@ -162,5 +229,83 @@ func sampleRealtime(code string, tradeDate time.Time, eventTs int64, seq uint64,
 		Ask4Vol:    24,
 		Ask5Price:  bid1 + 5,
 		Ask5Vol:    25,
+	}
+}
+
+func quoteRowAt(eventTs int64, volume int64, buys []priceLevel, sells []priceLevel) QuoteTickRealtime {
+	row := sampleRealtime("603000", time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC), eventTs, uint64(eventTs/1000), volume, 1000)
+	applyLevels(&row, buys, true)
+	applyLevels(&row, sells, false)
+	return row
+}
+
+func applyLevels(row *QuoteTickRealtime, levels []priceLevel, buy bool) {
+	for idx := range 5 {
+		price, num := 0, 0
+		if idx < len(levels) {
+			price = levels[idx].Price
+			num = levels[idx].Number
+		}
+		setLevel(row, idx, buy, price, num)
+	}
+}
+
+func setLevel(row *QuoteTickRealtime, idx int, buy bool, price int, num int) {
+	if buy {
+		switch idx {
+		case 0:
+			row.Bid1Price, row.Bid1Vol = price, num
+		case 1:
+			row.Bid2Price, row.Bid2Vol = price, num
+		case 2:
+			row.Bid3Price, row.Bid3Vol = price, num
+		case 3:
+			row.Bid4Price, row.Bid4Vol = price, num
+		default:
+			row.Bid5Price, row.Bid5Vol = price, num
+		}
+		return
+	}
+	switch idx {
+	case 0:
+		row.Ask1Price, row.Ask1Vol = price, num
+	case 1:
+		row.Ask2Price, row.Ask2Vol = price, num
+	case 2:
+		row.Ask3Price, row.Ask3Vol = price, num
+	case 3:
+		row.Ask4Price, row.Ask4Vol = price, num
+	default:
+		row.Ask5Price, row.Ask5Vol = price, num
+	}
+}
+
+func mustLevel(t *testing.T, levels []compressedLevel, price int) compressedLevel {
+	t.Helper()
+	for _, level := range levels {
+		if level.Price == price {
+			return level
+		}
+	}
+	t.Fatalf("price %d not found in levels: %+v", price, levels)
+	return compressedLevel{}
+}
+
+func assertSameGapRanges(t *testing.T, numbers []int) {
+	t.Helper()
+	for _, num := range numbers {
+		if num >= 0 {
+			continue
+		}
+		if num <= -120 {
+			t.Fatalf("expected negative marker > -120, got %d in %v", num, numbers)
+		}
+		if num >= -59 {
+			continue
+		}
+		if num >= -119 && num <= -60 {
+			continue
+		}
+		t.Fatalf("expected marker to be in gap[-59,-1] or same[-119,-60], got %d in %v", num, numbers)
 	}
 }

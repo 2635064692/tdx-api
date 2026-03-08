@@ -32,6 +32,22 @@ type compressedLevel struct {
 	Number []int `json:"number"`
 }
 
+const (
+	sameNumTag = -120
+	gapNumTag  = 0
+)
+
+type priceLevel struct {
+	Price  int
+	Number int
+}
+
+type levelAgg struct {
+	FirstTs      int64
+	LastSecondTs int64
+	Numbers      []int
+}
+
 func NewArchivalTask(db *xorm.Engine) *ArchivalTask {
 	return &ArchivalTask{db: db, now: time.Now}
 }
@@ -126,32 +142,128 @@ func aggregateQuoteTicks(rows []QuoteTickRealtime) (QuoteTickHistory, error) {
 }
 
 func compressLevels(rows []QuoteTickRealtime, buy bool) []compressedLevel {
-	levels := make([]compressedLevel, 0)
+	aggByPrice := make(map[int]*levelAgg)
+	for _, row := range rows {
+		mergeLevels(aggByPrice, rowLevels(row, buy), row.EventTs)
+	}
+	return toCompressedLevels(aggByPrice, buy)
+}
+
+func rowLevels(row QuoteTickRealtime, buy bool) []priceLevel {
+	levels := make([]priceLevel, 0, 5)
 	for idx := 0; idx < 5; idx++ {
-		levels = append(levels, compressLevel(rows, idx, buy)...)
+		price, vol := levelValues(row, idx, buy)
+		if price == 0 {
+			continue
+		}
+		levels = append(levels, priceLevel{Price: price, Number: vol})
 	}
 	return levels
 }
 
-func compressLevel(rows []QuoteTickRealtime, idx int, buy bool) []compressedLevel {
-	series := make([]compressedLevel, 0)
-	lastPrice := 0
-	lastVol := 0
-	initialized := false
-	for _, row := range rows {
-		price, vol := levelValues(row, idx, buy)
-		if !initialized || price != lastPrice {
-			series = append(series, compressedLevel{Ts: row.EventTs, Price: price, Number: []int{vol}})
-			lastPrice = price
-			lastVol = vol
-			initialized = true
+func mergeLevels(out map[int]*levelAgg, levels []priceLevel, tickTs int64) {
+	if out == nil {
+		return
+	}
+	secondTs := (tickTs / 1000) * 1000
+	levelMap := make(map[int]int, len(levels))
+	for _, level := range levels {
+		levelMap[level.Price] = level.Number
+	}
+	for price, agg := range out {
+		if _, ok := levelMap[price]; ok || secondTs <= agg.LastSecondTs {
 			continue
 		}
-		delta := vol - lastVol
-		series[len(series)-1].Number = append(series[len(series)-1].Number, delta)
-		lastVol = vol
+		agg.appendGapNum(secondTs)
 	}
-	return series
+	for _, level := range levels {
+		agg := out[level.Price]
+		if agg == nil {
+			out[level.Price] = newLevelAgg(secondTs, level.Number)
+			continue
+		}
+		agg.appendNum(level.Number, secondTs)
+	}
+}
+
+func toCompressedLevels(aggByPrice map[int]*levelAgg, buy bool) []compressedLevel {
+	if len(aggByPrice) == 0 {
+		return nil
+	}
+	prices := make([]int, 0, len(aggByPrice))
+	for price := range aggByPrice {
+		prices = append(prices, price)
+	}
+	sort.Ints(prices)
+	if buy {
+		sort.Sort(sort.Reverse(sort.IntSlice(prices)))
+	}
+	levels := make([]compressedLevel, 0, len(prices))
+	for _, price := range prices {
+		agg := aggByPrice[price]
+		if agg == nil {
+			continue
+		}
+		levels = append(levels, compressedLevel{
+			Ts:     agg.FirstTs,
+			Price:  price,
+			Number: append([]int(nil), agg.Numbers...),
+		})
+	}
+	return levels
+}
+
+func newLevelAgg(secondTs int64, num int) *levelAgg {
+	return &levelAgg{
+		FirstTs:      secondTs,
+		LastSecondTs: secondTs,
+		Numbers:      []int{num},
+	}
+}
+
+func (l *levelAgg) findLastValidNum() (int, bool) {
+	for i := len(l.Numbers) - 1; i >= 0; i-- {
+		if l.Numbers[i] >= 0 {
+			return l.Numbers[i], true
+		}
+	}
+	return 0, false
+}
+
+func (l *levelAgg) appendNum(num int, secondTs int64) {
+	lastNum := l.Numbers[len(l.Numbers)-1]
+	lastValidNum, ok := l.findLastValidNum()
+	switch {
+	case lastNum > 0:
+		if lastNum == num {
+			l.Numbers = append(l.Numbers, sameNumTag+1)
+		} else {
+			l.Numbers = append(l.Numbers, num)
+		}
+	case ok && num == lastValidNum:
+		if lastNum < -60 {
+			l.Numbers[len(l.Numbers)-1] = lastNum + 1
+		} else {
+			l.Numbers = append(l.Numbers, sameNumTag+1)
+		}
+	default:
+		l.Numbers = append(l.Numbers, num)
+	}
+	if secondTs > l.LastSecondTs {
+		l.LastSecondTs = secondTs
+	}
+}
+
+func (l *levelAgg) appendGapNum(secondTs int64) {
+	lastNum := l.Numbers[len(l.Numbers)-1]
+	if lastNum > 0 {
+		l.Numbers = append(l.Numbers, gapNumTag-1)
+	} else if lastNum > -60 {
+		l.Numbers[len(l.Numbers)-1] = lastNum - 1
+	} else {
+		l.Numbers = append(l.Numbers, gapNumTag-1)
+	}
+	l.LastSecondTs = secondTs
 }
 
 func levelValues(row QuoteTickRealtime, idx int, buy bool) (int, int) {

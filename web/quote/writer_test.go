@@ -100,7 +100,7 @@ func sampleTick(code string, eventTs int64, seq uint64) *QuoteTick {
 	return &QuoteTick{
 		Code:       code,
 		Exchange:   "sh",
-		TradeDate:  mustClock("2026-03-08T00:00:00+08:00"),
+		TradeDate:  time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC),
 		EventTs:    eventTs,
 		Seq:        seq,
 		Volume:     100,

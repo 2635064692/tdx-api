@@ -69,7 +69,7 @@ func NewQuoteTick(q *protocol.Quote, seq uint64, now time.Time) QuoteTick {
 	tick := QuoteTick{
 		Code:       q.Code,
 		Exchange:   q.Exchange.String(),
-		TradeDate:  time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()),
+		TradeDate:  time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC),
 		EventTs:    now.UnixMilli(),
 		Seq:        seq,
 		Volume:     int64(q.TotalHand),

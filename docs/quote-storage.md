@@ -16,6 +16,12 @@ QUOTE_STORAGE_ENABLED=1
 QUOTE_STORAGE_MYSQL_DSN=root:infini_rag_flow@tcp(192.168.144.3:3306)/vnpy?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai
 ```
 
+项目根目录已提供 `.env.example`，可直接复制：
+
+```bash
+cp .env.example .env
+```
+
 若只想关闭采集且不配置 MySQL：
 
 ```bash

@@ -39,13 +39,17 @@ func initQuoteStorageSystem() {
 		MigrationFile: "../migrations/001_quote_storage_schema.sql",
 	}
 	quoteStorageSystem = webquote.NewQuoteStorageSystem(nil, deps)
-	dsn := strings.TrimSpace(os.Getenv("QUOTE_STORAGE_MYSQL_DSN"))
-	if dsn == "" {
+	bootstrap := webquote.LoadBootstrapConfig(os.Getenv)
+	if !bootstrap.Enabled {
+		log.Printf("[quote-storage] bootstrap disabled by QUOTE_STORAGE_ENABLED, storage subsystem stays standby")
+		return
+	}
+	if bootstrap.DSN == "" {
 		log.Printf("[quote-storage] mysql dsn not configured, storage subsystem stays standby")
 		quoteStorageSystem.ReportError(fmt.Errorf("QUOTE_STORAGE_MYSQL_DSN is not configured"))
 		return
 	}
-	engine, err := webquote.OpenMySQLEngine(dsn)
+	engine, err := webquote.OpenMySQLEngine(bootstrap.DSN)
 	if err != nil {
 		log.Printf("[quote-storage] mysql init failed: %v", err)
 		quoteStorageSystem.ReportError(err)

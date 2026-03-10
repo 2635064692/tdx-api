@@ -207,7 +207,7 @@ func normalizeStockCodes(codes []string) ([]string, error) {
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no valid codes matched")
 	}
-	if len(out) > 2000 {
+	if len(out) > 4000 {
 		return nil, fmt.Errorf("too many codes after expansion (limit 2000, got %d)", len(out))
 	}
 

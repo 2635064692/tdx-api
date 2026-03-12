@@ -10,8 +10,9 @@ import (
 )
 
 type ArchivalTask struct {
-	db  *xorm.Engine
-	now func() time.Time
+	db           *xorm.Engine
+	now          func() time.Time
+	progressFunc func(current, total int, message string)
 }
 
 type archivalPayload struct {
@@ -52,6 +53,16 @@ func NewArchivalTask(db *xorm.Engine) *ArchivalTask {
 	return &ArchivalTask{db: db, now: time.Now}
 }
 
+func (a *ArchivalTask) SetProgressFunc(fn func(current, total int, message string)) {
+	a.progressFunc = fn
+}
+
+func (a *ArchivalTask) reportProgress(current, total int, message string) {
+	if a.progressFunc != nil {
+		a.progressFunc(current, total, message)
+	}
+}
+
 func (a *ArchivalTask) Run(ctx context.Context, tradeDate time.Time) error {
 	if tradeDate.IsZero() {
 		tradeDate = a.now()
@@ -60,50 +71,81 @@ func (a *ArchivalTask) Run(ctx context.Context, tradeDate time.Time) error {
 }
 
 func (a *ArchivalTask) archiveDate(ctx context.Context, tradeDate time.Time) error {
-	rows, err := a.loadRealtimeRows(tradeDate)
-	if err != nil || len(rows) == 0 {
-		return err
-	}
-	histories, err := a.aggregateRows(rows)
+	codes, err := a.loadCodesByDate(tradeDate)
 	if err != nil {
 		return err
 	}
-	if err := a.writeHistory(histories); err != nil {
+	if len(codes) == 0 {
+		return nil
+	}
+	totalCodes := len(codes)
+	a.reportProgress(0, totalCodes, "开始归档")
+
+	var histories []QuoteTickHistory
+	for i, code := range codes {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		a.reportProgress(i, totalCodes, "处理股票: "+code)
+
+		rows, err := a.loadRealtimeRowsByCode(tradeDate, code)
+		if err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			continue
+		}
+		history, err := aggregateQuoteTicks(rows)
+		if err != nil {
+			return err
+		}
+		histories = append(histories, history)
+		if len(histories) >= 100 {
+			if err := a.writeHistory(histories); err != nil {
+				return err
+			}
+			histories = histories[:0]
+		}
+	}
+	if len(histories) > 0 {
+		if err := a.writeHistory(histories); err != nil {
+			return err
+		}
+	}
+	a.reportProgress(totalCodes, totalCodes, "验证归档结果")
+
+	if err := a.verifyArchival(tradeDate, len(codes)); err != nil {
 		return err
 	}
-	if err := a.verifyArchival(tradeDate, len(histories)); err != nil {
-		return err
-	}
+
+	a.reportProgress(totalCodes, totalCodes, "清理实时数据")
 	return a.cleanupRealtime(tradeDate)
 }
 
-func (a *ArchivalTask) loadRealtimeRows(tradeDate time.Time) ([]QuoteTickRealtime, error) {
+func (a *ArchivalTask) loadCodesByDate(tradeDate time.Time) ([]string, error) {
+	if a.db == nil {
+		return nil, nil
+	}
+	var codes []string
+	err := a.db.Table(QuoteTickRealtime{}.TableName()).
+		Where("DATE(trade_date) = ?", tradeDateKey(tradeDate)).
+		Distinct("code").
+		Find(&codes)
+	return codes, err
+}
+
+func (a *ArchivalTask) loadRealtimeRowsByCode(tradeDate time.Time, code string) ([]QuoteTickRealtime, error) {
 	if a.db == nil {
 		return nil, nil
 	}
 	rows := make([]QuoteTickRealtime, 0)
-	err := a.db.Table(QuoteTickRealtime{}.TableName()).Where("DATE(trade_date) = ?", tradeDateKey(tradeDate)).Asc("code", "event_ts", "seq").Find(&rows)
+	err := a.db.Table(QuoteTickRealtime{}.TableName()).
+		Where("DATE(trade_date) = ? AND code = ?", tradeDateKey(tradeDate), code).
+		Asc("event_ts", "seq").
+		Find(&rows)
 	return rows, err
-}
-
-func (a *ArchivalTask) aggregateRows(rows []QuoteTickRealtime) ([]QuoteTickHistory, error) {
-	groups := make(map[string][]QuoteTickRealtime)
-	order := make([]string, 0)
-	for _, row := range rows {
-		if _, ok := groups[row.Code]; !ok {
-			order = append(order, row.Code)
-		}
-		groups[row.Code] = append(groups[row.Code], row)
-	}
-	histories := make([]QuoteTickHistory, 0, len(groups))
-	for _, code := range order {
-		history, err := aggregateQuoteTicks(groups[code])
-		if err != nil {
-			return nil, err
-		}
-		histories = append(histories, history)
-	}
-	return histories, nil
 }
 
 func aggregateQuoteTicks(rows []QuoteTickRealtime) (QuoteTickHistory, error) {
@@ -141,11 +183,30 @@ func aggregateQuoteTicks(rows []QuoteTickRealtime) (QuoteTickHistory, error) {
 	}, nil
 }
 
+// compressLevels aggregates tick data into second-level compressed format.
+// Assumes rows are sorted by EventTs (and Seq) in ascending order.
 func compressLevels(rows []QuoteTickRealtime, buy bool) []compressedLevel {
 	aggByPrice := make(map[int]*levelAgg)
-	for _, row := range rows {
-		mergeLevels(aggByPrice, rowLevels(row, buy), row.EventTs)
+
+	var lastSecond int64 = -1
+	var lastRow *QuoteTickRealtime
+
+	flush := func() {
+		if lastRow != nil {
+			mergeLevels(aggByPrice, rowLevels(*lastRow, buy), lastRow.EventTs)
+		}
 	}
+
+	for i := range rows {
+		sec := (rows[i].EventTs / 1000) * 1000
+		if sec != lastSecond {
+			flush()
+			lastSecond = sec
+		}
+		lastRow = &rows[i]
+	}
+	flush()
+
 	return toCompressedLevels(aggByPrice, buy)
 }
 
@@ -319,8 +380,24 @@ func (a *ArchivalTask) verifyArchival(tradeDate time.Time, expected int) error {
 }
 
 func (a *ArchivalTask) cleanupRealtime(tradeDate time.Time) error {
-	_, err := a.db.Table(QuoteTickRealtime{}.TableName()).Where("DATE(trade_date) = ?", tradeDateKey(tradeDate)).Delete(&QuoteTickRealtime{})
-	return err
+	const batchSize = 10000
+	for {
+		result, err := a.db.Exec(
+			"DELETE FROM "+QuoteTickRealtime{}.TableName()+" WHERE DATE(trade_date) = ? LIMIT ?",
+			tradeDateKey(tradeDate), batchSize,
+		)
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected == 0 {
+			break
+		}
+	}
+	return nil
 }
 
 func normalizeTradeDate(tradeDate time.Time) time.Time {

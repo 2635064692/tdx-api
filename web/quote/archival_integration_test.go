@@ -4,15 +4,23 @@ package quote
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestArchivalVerifyOneMinute_603977_20260312(t *testing.T) {
-	dsn := os.Getenv("QUOTE_STORAGE_MYSQL_DSN")
+	dsn := strings.TrimSpace(os.Getenv("QUOTE_STORAGE_MYSQL_DSN"))
 	if dsn == "" {
-		t.Fatalf("QUOTE_STORAGE_MYSQL_DSN is empty; set it in the test environment")
+		var err error
+		dsn, err = loadEnvValue(".env", "QUOTE_STORAGE_MYSQL_DSN")
+		if err != nil {
+			t.Fatalf("QUOTE_STORAGE_MYSQL_DSN is empty and not found in .env: %v", err)
+		}
 	}
 
 	db, err := OpenMySQLEngine(dsn)
@@ -72,7 +80,73 @@ func TestArchivalVerifyOneMinute_603977_20260312(t *testing.T) {
 		t.Fatalf("expected minuteStartTs=%d, got %d", minuteStartTs, payload.Minutes[0].Ts)
 	}
 
+	outPath := fmt.Sprintf("/tmp/archival_603977_2026-03-12_minute_%d.json", minuteStartTs)
+	pretty, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal payload failed: %v", err)
+	}
+	if err := os.WriteFile(outPath, pretty, 0o644); err != nil {
+		t.Fatalf("write json file failed: %v", err)
+	}
+	t.Logf("wrote_json=%s", outPath)
 	t.Logf("minuteStartTs=%d ticks=%d buyLevels=%d sellLevels=%d", minuteStartTs, len(oneMinute), len(payload.Minutes[0].BuyLevel), len(payload.Minutes[0].SellLevel))
-	t.Logf("archival_payload_json=%s", history.QuoteTicks)
 }
 
+func loadEnvValue(relEnvFile, key string) (string, error) {
+	if strings.TrimSpace(key) == "" {
+		return "", errors.New("key is empty")
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	candidates := []string{
+		filepath.Join(wd, relEnvFile),
+		filepath.Join(wd, "..", relEnvFile),
+		filepath.Join(wd, "..", "..", relEnvFile),
+	}
+
+	var lastErr error
+	for _, path := range candidates {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		val, ok := parseDotEnv(string(raw), key)
+		if ok && strings.TrimSpace(val) != "" {
+			return strings.TrimSpace(val), nil
+		}
+		lastErr = fmt.Errorf("key %s not found in %s", key, path)
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no .env candidates checked")
+	}
+	return "", lastErr
+}
+
+func parseDotEnv(content, key string) (string, bool) {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "export ") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		k = strings.TrimSpace(k)
+		if k != key {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		v = strings.Trim(v, `"'`)
+		return v, true
+	}
+	return "", false
+}

@@ -50,6 +50,9 @@ func TestArchivalTaskArchivesAndCleansRealtime(t *testing.T) {
 	if payload.TotalHand != 120 || payload.Amount != 12.5 {
 		t.Fatalf("unexpected payload totals: %+v", payload)
 	}
+	if len(payload.Minutes) != 1 {
+		t.Fatalf("expected one minute payload for sample ticks, got %d", len(payload.Minutes))
+	}
 }
 
 func TestArchivalTaskIsIdempotent(t *testing.T) {
@@ -117,6 +120,21 @@ func TestCompressLevelsDistinguishesSameAndGapRanges(t *testing.T) {
 	assertSameGapRanges(t, gapLevel.Number)
 }
 
+func TestCompressLevelsDoesNotDownsampleWithinSameSecond(t *testing.T) {
+	rows := []QuoteTickRealtime{
+		quoteRowAt(1000, 10, []priceLevel{{Price: 1000, Number: 10}}, nil),
+		quoteRowAt(1500, 10, []priceLevel{{Price: 1000, Number: 10}}, nil),
+		quoteRowAt(1999, 10, []priceLevel{{Price: 1000, Number: 10}}, nil),
+	}
+
+	buyLevels := compressLevels(rows, true)
+	level := mustLevel(t, buyLevels, 1000)
+	if !slices.Equal(level.Number, []int{10, -118}) {
+		t.Fatalf("expected same marker to reflect 3 ticks in same second, got %v", level.Number)
+	}
+	assertSameGapRanges(t, level.Number)
+}
+
 func TestAggregateQuoteTicksKeepsNegativeMarkersAboveMinus120(t *testing.T) {
 	rows := []QuoteTickRealtime{
 		quoteRowAt(1000, 10, []priceLevel{{Price: 1000, Number: 10}, {Price: 999, Number: 9}}, []priceLevel{{Price: 1001, Number: 20}}),
@@ -134,8 +152,37 @@ func TestAggregateQuoteTicksKeepsNegativeMarkersAboveMinus120(t *testing.T) {
 	if err := json.Unmarshal([]byte(history.QuoteTicks), &payload); err != nil {
 		t.Fatalf("unmarshal payload failed: %v", err)
 	}
-	for _, level := range append(append([]compressedLevel{}, payload.BuyLevel...), payload.SellLevel...) {
-		assertSameGapRanges(t, level.Number)
+	for _, minute := range payload.Minutes {
+		for _, level := range append(append([]compressedLevel{}, minute.BuyLevel...), minute.SellLevel...) {
+			assertSameGapRanges(t, level.Number)
+		}
+	}
+}
+
+func TestAggregateQuoteTicksBucketsByMinute(t *testing.T) {
+	rows := []QuoteTickRealtime{
+		quoteRowAt(59_000, 10, []priceLevel{{Price: 1000, Number: 10}}, []priceLevel{{Price: 1001, Number: 20}}),
+		quoteRowAt(60_000, 12, []priceLevel{{Price: 1000, Number: 10}}, []priceLevel{{Price: 1001, Number: 20}}),
+		quoteRowAt(61_000, 14, []priceLevel{{Price: 1000, Number: 10}}, []priceLevel{{Price: 1001, Number: 20}}),
+	}
+
+	history, err := aggregateQuoteTicks(rows)
+	if err != nil {
+		t.Fatalf("aggregateQuoteTicks returned error: %v", err)
+	}
+
+	var payload archivalPayload
+	if err := json.Unmarshal([]byte(history.QuoteTicks), &payload); err != nil {
+		t.Fatalf("unmarshal payload failed: %v", err)
+	}
+	if len(payload.Minutes) != 2 {
+		t.Fatalf("expected 2 minute buckets, got %d", len(payload.Minutes))
+	}
+	if payload.Minutes[0].Ts != 0 {
+		t.Fatalf("expected first minuteStartTs=0, got %d", payload.Minutes[0].Ts)
+	}
+	if payload.Minutes[1].Ts != 60_000 {
+		t.Fatalf("expected second minuteStartTs=60000, got %d", payload.Minutes[1].Ts)
 	}
 }
 

@@ -23,8 +23,13 @@ type archivalPayload struct {
 	InsideDish int               `json:"insideDish"`
 	OuterDisc  int               `json:"outerDisc"`
 	Ts         int64             `json:"ts"`
-	BuyLevel   []compressedLevel `json:"buyLevel"`
-	SellLevel  []compressedLevel `json:"sellLevel"`
+	Minutes    []minutePayload   `json:"minutes"`
+}
+
+type minutePayload struct {
+	Ts        int64             `json:"ts"`
+	BuyLevel  []compressedLevel `json:"buyLevel"`
+	SellLevel []compressedLevel `json:"sellLevel"`
 }
 
 type compressedLevel struct {
@@ -155,12 +160,41 @@ func aggregateQuoteTicks(rows []QuoteTickRealtime) (QuoteTickHistory, error) {
 		}
 		return rows[i].EventTs < rows[j].EventTs
 	})
+
+	minutes := make([]minutePayload, 0)
+	var currentMinuteStart int64 = -1
+	var minuteBuyAgg map[int]*levelAgg
+	var minuteSellAgg map[int]*levelAgg
+
+	flushMinute := func() {
+		if currentMinuteStart < 0 {
+			return
+		}
+		minutes = append(minutes, minutePayload{
+			Ts:        currentMinuteStart,
+			BuyLevel:  toCompressedLevels(minuteBuyAgg, true),
+			SellLevel: toCompressedLevels(minuteSellAgg, false),
+		})
+	}
+
+	for i := range rows {
+		minuteStart := (rows[i].EventTs / 60_000) * 60_000
+		if minuteStart != currentMinuteStart {
+			flushMinute()
+			currentMinuteStart = minuteStart
+			minuteBuyAgg = make(map[int]*levelAgg)
+			minuteSellAgg = make(map[int]*levelAgg)
+		}
+		mergeLevels(minuteBuyAgg, rowLevels(rows[i], true), rows[i].EventTs)
+		mergeLevels(minuteSellAgg, rowLevels(rows[i], false), rows[i].EventTs)
+	}
+	flushMinute()
+
 	payload := archivalPayload{
 		Code:      rows[0].Code,
 		Exchange:  rows[0].Exchange,
 		Ts:        rows[0].EventTs,
-		BuyLevel:  compressLevels(rows, true),
-		SellLevel: compressLevels(rows, false),
+		Minutes:   minutes,
 	}
 	last := rows[len(rows)-1]
 	payload.TotalHand = last.Volume
@@ -188,24 +222,9 @@ func aggregateQuoteTicks(rows []QuoteTickRealtime) (QuoteTickHistory, error) {
 func compressLevels(rows []QuoteTickRealtime, buy bool) []compressedLevel {
 	aggByPrice := make(map[int]*levelAgg)
 
-	var lastSecond int64 = -1
-	var lastRow *QuoteTickRealtime
-
-	flush := func() {
-		if lastRow != nil {
-			mergeLevels(aggByPrice, rowLevels(*lastRow, buy), lastRow.EventTs)
-		}
-	}
-
 	for i := range rows {
-		sec := (rows[i].EventTs / 1000) * 1000
-		if sec != lastSecond {
-			flush()
-			lastSecond = sec
-		}
-		lastRow = &rows[i]
+		mergeLevels(aggByPrice, rowLevels(rows[i], buy), rows[i].EventTs)
 	}
-	flush()
 
 	return toCompressedLevels(aggByPrice, buy)
 }
@@ -380,6 +399,14 @@ func (a *ArchivalTask) verifyArchival(tradeDate time.Time, expected int) error {
 }
 
 func (a *ArchivalTask) cleanupRealtime(tradeDate time.Time) error {
+	if a.db != nil && a.db.DriverName() == "sqlite" {
+		_, err := a.db.Exec(
+			"DELETE FROM "+QuoteTickRealtime{}.TableName()+" WHERE DATE(trade_date) = ?",
+			tradeDateKey(tradeDate),
+		)
+		return err
+	}
+
 	const batchSize = 10000
 	for {
 		result, err := a.db.Exec(

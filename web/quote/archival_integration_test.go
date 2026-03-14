@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +47,13 @@ func TestArchivalVerifyOneMinute_603977_20260312(t *testing.T) {
 	}
 
 	minuteStartTs := (rows[0].EventTs / 60_000) * 60_000
+	if raw := strings.TrimSpace(os.Getenv("ARCHIVAL_MINUTE_START_TS")); raw != "" {
+		override, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			t.Fatalf("invalid ARCHIVAL_MINUTE_START_TS=%q: %v", raw, err)
+		}
+		minuteStartTs = (override / 60_000) * 60_000
+	}
 	minuteEndTs := minuteStartTs + 60_000
 	oneMinute := make([]QuoteTickRealtime, 0)
 	for i := range rows {

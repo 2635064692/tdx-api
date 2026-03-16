@@ -1,7 +1,5 @@
 .claude/
 .ssh/
-go.work
-go.work.sum
 web/tdx-api
 data/database/*.db
 web/data/database/*.db

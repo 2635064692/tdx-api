@@ -1,186 +1,78 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## 角色设定
 
-## Development Environment
+你是一个 AI 编程助手，负责协助开发 TDX-API 项目。该项目是基于通达信协议的股票数据查询系统。
 
-**Container**: `go-dev-container`
-- Current directory mounted to `/app/tdx-api/` inside container
 
-**Workflow**:
-- **Local (host)**: Code search, analysis, and editing
-- **Container**: Build, test, and verification
+## 远端开发环境（SSH / Docker）
 
-### Container Commands
+- 远端 SSH 开发主机通过 SSH MCP 连接（connection name: `default`）。
+- 宿主机上有 `go-dev-container` Docker 容器：将宿主机 `/home/haizh/opensource/golang/tdx-api` 挂载到容器内 `/app/tdx-api/`。
+- **编译与验证在容器内执行**。
+- **所有远端命令必须通过 SSH MCP 工具 `mcp__mcp-router__execute-command` 执行**（不要在远端主机上直接手工跑命令，也不要在远端做写入性操作）。
+- SSH MCP 执行建议：一次批次不要超过 **5 条命令**，按步骤分批执行，便于定位失败点与避免超长会话。
+- ip: 通过 ssh mcp 获取
+
+## Git 约束（强制）
+
+本项目代码在远端宿主机 `/home/haizh/opensource/golang/tdx-api` 通过 Git 管理，但远端 Git 操作有严格限制：
+
+- **远端宿主机仅允许 `git pull`**。
+- 严禁在远端执行 `git push`、`git commit` 或任何写入性 Git 操作。
+- 本机当前目录下允许执行 `git push`、`git commit` 或任何写入性 Git 操作。
+- 所有代码变更/提交/推送必须在本地完成后，再由远端宿主机 `git pull` 同步。
+
+**重要**：所有 Go 编译、测试、运行命令必须在容器内执行。
+
+## 命令执行规范
+
+### 容器内执行（编译/测试/运行）
+
 ```bash
-# Attach to container
-docker exec -it go-dev-container /bin/bash
+# 编译
+docker exec -it go-dev-container bash -c "cd /app/tdx-api/web && go build -o tdx-api ."
 
-# In container, work at /app/tdx-api/
-cd /app/tdx-api/
+# 运行测试
+docker exec -it go-dev-container bash -c "cd /app/tdx-api/web && go test ./..."
 
-# Build and run
-cd web && go run .
+# 启动服务
+docker exec -it go-dev-container bash -c "cd /app/tdx-api/web && go run ."
 
-# Run tests
-go test ./...
+# 添加依赖
+docker exec -it go-dev-container bash -c "cd /app/tdx-api/web && go get github.com/gorilla/websocket"
 
-# Build binary
-go build -o tdx-api .
+# 整理依赖
+docker exec -it go-dev-container bash -c "cd /app/tdx-api/web && go mod tidy"
 ```
 
-## Project Overview
 
-TDX-API is a stock data query system based on the Tongda Xin (TDX) protocol. It provides:
-- Real-time market data (K-line, minute, five-level quotes)
-- RESTful API (32 endpoints)
-- Web visualization interface
-- Docker containerized deployment
+## 代码修改规范
 
-## Commands
+1. 编辑文件使用当前路径：`/home/opensource/golang/tdx-api/`
+2. 编译验证使用远端容器路径：`/app/tdx-api/`
+3. 修改代码后必须在容器内编译验证
 
-### Docker Deployment (Recommended)
-```bash
-docker-compose up -d
-# Access at http://localhost:8080
-```
+## 功能验收约束
 
-### Source Code Running
-```bash
-# Go 1.22+ required
+每次代码修改后，必须依次验证：
 
-# Download dependencies
-go mod download
+| 步骤 | 命令 | 预期结果 |
+|------|------|----------|
+| 1. 编译 | `docker exec -it go-dev-container bash -c "cd /app/tdx-api/web && go build -o tdx-api ."` | 无错误 |
+| 2. 测试 | `docker exec -it go-dev-container bash -c "cd /app/tdx-api/web && go test ./..."` | 全部通过 |
+| 3. 启动 | `docker exec -it go-dev-container bash -c "cd /app/tdx-api/web && go run ."` | 服务正常启动 |
+| 4. 健康检查 | `curl http://localhost:8080/api/health` | 返回正常 |
 
-# Run web server (must use go run .)
-cd web && go run .
-
-# Access at http://localhost:8080
-```
-
-### Docker Build
-```bash
-docker build -t tdx-stock-web .
-docker-compose up -d
-docker-compose logs -f
-```
-
-## Architecture
+## 项目结构
 
 ```
-tdx-api/
-├── client.go          # TDX client core with connection pool management
-├── protocol/          # TDX protocol implementation (binary frame encoding)
-├── pool.go            # Channel-based connection pool
-├── manage.go          # Manager with pool, cron, codes, workday
-├── workday.go         # Trading calendar management
-├── codes.go           # Stock code management
-├── dial.go            # Dial strategies (range, random, hosts)
-├── hosts.go           # Server addresses configuration
-│
-├── protocol/
-│   ├── frame.go       # Binary frame encode/decode, zlib compression
-│   ├── const.go       # Protocol constants
-│   ├── types.go       # Type definitions
-│   └── model_*.go     # Data models (Quote, Kline, Trade, Minute)
-│
-├── extend/            # Extended features
-│   ├── pull-kline.go  # K-line data pull tasks
-│   ├── pull-trade.go  # Trade data pull tasks
-│   ├── spider-ths.go  # Tonghuashun data crawler
-│   └── codes-*.go     # Code services
-│
-├── web/               # Web application
-│   ├── server.go      # HTTP server, 32 API endpoints registration
-│   ├── server_api_extended.go  # Extended API handlers
-│   ├── tasks.go       # Task management (pull, list, cancel)
-│   └── static/        # Frontend (HTML/CSS/JS + ECharts)
-│
-└── example/           # 34 usage examples
+/home/opensource/golang/tdx-api/     # 宿主机路径
+/app/tdx-api/                        # 容器内路径（同一份代码）
+├── web/                             # Web 应用（入口）
+│   ├── server.go                    # HTTP 服务器
+│   └── go.mod                       # Web 模块依赖
+├── client.go                        # TDX 客户端核心
+├── pool.go                          # 连接池
+└── protocol/                        # TDX 协议实现
 ```
-
-### Key Modules
-
-| File | Purpose |
-|------|---------|
-| **client.go** | Client core, Dial* functions, message handler, SendFrame with wait/timeout |
-| **pool.go** | Channel-based connection pool (Get/Put/Do/Go methods) |
-| **manage.go** | Manager struct combining Pool, Cron scheduler, Codes, Workday |
-| **protocol/frame.go** | Binary protocol: 0x0C prefix, zlib decompression, frame encode/decode |
-| **dial.go** | Dial strategies: RangeDial, RandomDial, HostDial, TCPDial |
-
-### TDX Protocol
-
-- **Frame Header**: `0x0C` fixed prefix
-- **Response Header**: `0xB1CB7400`
-- **Compression**: zlib deflate for response data
-- **Heartbeat**: 30-second ping to keep connection alive
-- **Message Flow**: Request frame → Response frame → Decompress → Parse
-
-### Connection Management
-
-```go
-// Dial strategies (dial.go)
-DialDefault()           // Auto-select fastest server from Hosts
-DialHostsRange()        // Try hosts in order, stop on first success
-DialHostsRandom()       // Random server selection
-DialHosts()             // Round-robin with retry
-
-// Pool (pool.go)
-NewPool(dialFunc, number)  // Channel-based pool
-Get()                       // Acquire connection
-Put()                       // Return connection
-Do(fn)                      // Execute with auto get/put
-Go(fn)                      // Execute async with auto get/put
-```
-
-### API Endpoints (32 total)
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/quote` | GET | Five-level quotes |
-| `/api/kline` | GET | K-line data |
-| `/api/minute` | GET | Minute data |
-| `/api/trade` | GET | Trade records |
-| `/api/search` | GET | Stock search |
-| `/api/stock-info` | GET | Comprehensive info |
-| `/api/codes` | GET | Code list |
-| `/api/batch-quote` | POST | Batch quotes |
-| `/api/kline-history` | GET | Historical K-line |
-| `/api/index` | GET | Index data |
-| `/api/market-stats` | GET | Market statistics |
-| `/api/tasks/pull-kline` | POST | Create K-line pull task |
-| `/api/tasks/pull-trade` | POST | Create trade pull task |
-| `/api/tasks` | GET | List tasks |
-| `/api/health` | GET | Health check |
-
-### TDX Servers
-
-System auto-connects to fastest server from:
-- 124.71.187.122 (Shanghai)
-- 122.51.120.217 (Shanghai)
-- 121.36.54.217 (Beijing)
-- 124.71.85.110 (Guangzhou)
-
-### Scheduled Tasks
-
-- **Workday calendar**: Auto-update trading days via cron
-- **Heartbeat**: 30-second keep-alive ping
-- **Auto-reconnect**: On connection failure
-
-## Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| github.com/injoyai/* | Base framework (base, conv, ios, logs) |
-| xorm.io/xorm | ORM for SQLite/MySQL |
-| github.com/robfig/cron/v3 | Scheduled tasks |
-| github.com/glebarez/go-sqlite | SQLite driver |
-
-## Important Notes
-
-- **Go version**: Root module requires Go 1.20+, web module requires Go 1.23+
-- **Entry point**: Use `cd web && go run .` - NOT `go run server.go`
-- **Multi-module**: Two go.mod files (root + web), they replace each other
-- **Data source**: TDX public servers, data may have delays
-- **Client initialization**: Creates pool of 4 connections by default

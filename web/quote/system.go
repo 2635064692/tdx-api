@@ -3,6 +3,7 @@ package quote
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -68,12 +69,16 @@ func NewQuoteStorageSystem(db *xorm.Engine, deps SystemDependencies) *QuoteStora
 		queueSize = DefaultQueueSize
 	}
 	queue := make(chan *QuoteTick, queueSize)
+	archival := NewArchivalTask(db)
+	archival.SetProgressFunc(func(current, total int, message string) {
+		log.Printf("[归档进度] %d/%d - %s", current, total, message)
+	})
 	s := &QuoteStorageSystem{
 		db:        db,
 		queue:     queue,
 		collector: NewQuoteCollector(queue, deps.Collector),
 		writer:    NewBatchWriter(db, queue, DefaultBatchSize, time.Duration(DefaultFlushIntervalMs)*time.Millisecond),
-		archival:  NewArchivalTask(db),
+		archival:  archival,
 	}
 	s.configPoller = NewConfigPoller(db, deps.PollInterval, s.onConfigChange)
 	if path := strings.TrimSpace(deps.MigrationFile); path != "" && db != nil {

@@ -1,6 +1,4 @@
-.vscode/
 .claude/
-.devcontainer/
 .ssh/
 go.work
 go.work.sum

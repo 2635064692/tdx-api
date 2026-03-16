@@ -1,0 +1,13 @@
+{
+  "go.goroot": "/usr/local/go",
+  "go.useLanguageServer": true,
+  "go.autocompleteUnimportedPackages": true,
+  "go.gotoSymbol.includeImports": true,
+  "go.toolsEnvVars": {
+    "GOWORK": "${workspaceFolder}/go.work"
+  },
+  "[go]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "golang.go"
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch Web Server",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/web",
+      "cwd": "${workspaceFolder}/web",
+      "envFile": "${workspaceFolder}/.env",
+      "args": []
+    },
+    {
+      "name": "Debug GetHistoryMinuteTradeDay",
+      "type": "go",
+      "request": "launch",
+      "mode": "test",
+      "program": "${workspaceFolder}/web",
+      "buildFlags": "-tags=integration",
+      "args": ["-test.run", "TestIntegration_GetHistoryMinuteTradeDay", "-test.v"]
+    },
+    {
+      "name": "Debug Trade Test",
+      "type": "go",
+      "request": "launch",
+      "mode": "test",
+      "program": "${workspaceFolder}/web",
+      "args": ["-test.run", "TestHandleGetTrade_Today", "-test.v"]
+    },
+    {
+      "name": "Debug All Trade Tests",
+      "type": "go",
+      "request": "launch",
+      "mode": "test",
+      "program": "${workspaceFolder}/web",
+      "args": ["-test.run", "TestHandleGetTrade", "-test.v"]
+    },
+    {
+      "name": "Attach to Delve",
+      "type": "go",
+      "request": "attach",
+      "mode": "remote",
+      "remotePath": "/app/tdx-api",
+      "port": 2345,
+      "host": "127.0.0.1"
+    }
+  ]
+}

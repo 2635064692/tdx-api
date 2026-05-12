@@ -19,6 +19,7 @@ const (
 	ConfigKeyStorageSource    = "QUOTE_STORAGE_SOURCE"
 	ConfigKeyStorageBatchSize = "QUOTE_STORAGE_BATCH_SIZE"
 	ConfigKeyStorageFlushMs   = "QUOTE_STORAGE_FLUSH_INTERVAL_MS"
+	ConfigKeyMarketHolidays   = "QUOTE_MARKET_HOLIDAYS"
 	DefaultPollInterval       = time.Minute
 )
 
@@ -29,6 +30,7 @@ var watchedConfigKeys = []string{
 	ConfigKeyTradeSessions,
 	ConfigKeyStorageBatchSize,
 	ConfigKeyStorageFlushMs,
+	ConfigKeyMarketHolidays,
 }
 
 const configQuerySQL = `
@@ -40,7 +42,8 @@ WHERE config_key IN (
     'QUOTE_WS_SUBSCRIBE_CODES',
     'QUOTE_WS_TRADE_SESSIONS',
     'QUOTE_STORAGE_BATCH_SIZE',
-    'QUOTE_STORAGE_FLUSH_INTERVAL_MS'
+    'QUOTE_STORAGE_FLUSH_INTERVAL_MS',
+    'QUOTE_MARKET_HOLIDAYS'
 )`
 
 type ConfigPoller struct {
@@ -215,6 +218,7 @@ func parseConfig(values map[string]string, updateTs int64) (QuoteSubscriptionCon
 		return cfg, fmt.Errorf("invalid %s: %w", ConfigKeyTradeSessions, err)
 	}
 	cfg.Ranges = ranges
+	cfg.Holidays = parseHolidays(values[ConfigKeyMarketHolidays])
 	return cfg, nil
 }
 
@@ -328,7 +332,7 @@ func normalizeWhitespace(raw string) string {
 }
 
 func configsEqual(a, b QuoteSubscriptionConfig) bool {
-	if a.Enabled != b.Enabled || a.Source != b.Source || a.TradeSessions != b.TradeSessions || a.BatchSize != b.BatchSize || a.FlushIntervalMs != b.FlushIntervalMs {
+	if a.Enabled != b.Enabled || a.Source != b.Source || a.TradeSessions != b.TradeSessions || a.BatchSize != b.BatchSize || a.FlushIntervalMs != b.FlushIntervalMs || !holidaysEqual(a.Holidays, b.Holidays) {
 		return false
 	}
 	if len(a.Codes) != len(b.Codes) || len(a.Ranges) != len(b.Ranges) {
@@ -341,6 +345,32 @@ func configsEqual(a, b QuoteSubscriptionConfig) bool {
 	}
 	for i := range a.Ranges {
 		if a.Ranges[i] != b.Ranges[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func parseHolidays(raw string) map[string]bool {
+	dates := splitConfigList(raw)
+	if len(dates) == 0 {
+		return nil
+	}
+	m := make(map[string]bool, len(dates))
+	for _, d := range dates {
+		if d != "" {
+			m[d] = true
+		}
+	}
+	return m
+}
+
+func holidaysEqual(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if !b[k] {
 			return false
 		}
 	}

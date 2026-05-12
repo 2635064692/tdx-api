@@ -21,7 +21,8 @@ type QuoteSubscriptionConfig struct {
 	BatchSize       int         `json:"batch_size"`
 	FlushIntervalMs int         `json:"flush_interval_ms"`
 	UpdatedAt       int64       `json:"updated_at"`
-	Ranges          []TimeRange `json:"ranges,omitempty"`
+	Ranges          []TimeRange     `json:"ranges,omitempty"`
+	Holidays        map[string]bool `json:"holidays,omitempty"`
 }
 
 func DefaultConfig() QuoteSubscriptionConfig {
@@ -36,6 +37,12 @@ func (c QuoteSubscriptionConfig) Clone() QuoteSubscriptionConfig {
 	dup := c
 	dup.Codes = append([]string(nil), c.Codes...)
 	dup.Ranges = append([]TimeRange(nil), c.Ranges...)
+	if c.Holidays != nil {
+		dup.Holidays = make(map[string]bool, len(c.Holidays))
+		for k, v := range c.Holidays {
+			dup.Holidays[k] = v
+		}
+	}
 	return dup
 }
 

@@ -10,7 +10,7 @@ import (
 	"github.com/injoyai/tdx/protocol"
 )
 
-const collectorInterval = time.Second
+const collectorInterval = 3 * time.Second
 
 type CollectorDependencies struct {
 	NormalizeCodes  func([]string) ([]string, error)
@@ -100,7 +100,7 @@ func (c *QuoteCollector) ExpandedCodes() []string {
 
 func (c *QuoteCollector) collect(ctx context.Context, now time.Time) error {
 	cfg, codes := c.snapshot()
-	if !cfg.Enabled || len(codes) == 0 || !isInTimeWindow(now, cfg.Ranges) {
+	if !cfg.Enabled || len(codes) == 0 || !isTradingDay(now, cfg.Holidays) || !isInTimeWindow(now, cfg.Ranges) {
 		return nil
 	}
 	quotes, err := c.fetchQuotes(cfg.Source, codes)
@@ -183,4 +183,15 @@ func isInTimeWindow(now time.Time, ranges []TimeRange) bool {
 		}
 	}
 	return false
+}
+
+func isTradingDay(now time.Time, holidays map[string]bool) bool {
+	w := now.Weekday()
+	if w == time.Saturday || w == time.Sunday {
+		return false
+	}
+	if len(holidays) == 0 {
+		return true
+	}
+	return !holidays[now.Format("2006-01-02")]
 }

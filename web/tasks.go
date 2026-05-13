@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -66,6 +67,7 @@ func (tm *TaskManager) Run(taskType string, fn func(ctx context.Context) error) 
 			if task.Status != TaskStatusCancelled {
 				task.Status = TaskStatusFailed
 				task.Error = err.Error()
+				log.Printf("[task] %s (%s) failed: %v", task.ID, task.Type, err)
 			}
 			return
 		}

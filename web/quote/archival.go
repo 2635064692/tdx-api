@@ -254,7 +254,11 @@ func mergeLevels(out map[int]*levelAgg, levels []priceLevel, tickTs int64) {
 		if _, ok := levelMap[price]; ok || secondTs <= agg.LastSecondTs {
 			continue
 		}
-		agg.appendGapNum(secondTs)
+		baseTs := agg.LastSecondTs
+		gapSeconds := int((secondTs-baseTs)/1000 - 1)
+		for g := 0; g < gapSeconds; g++ {
+			agg.appendGapNum(baseTs + int64(g+1)*1000)
+		}
 	}
 	for _, level := range levels {
 		agg := out[level.Price]

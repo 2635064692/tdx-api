@@ -191,6 +191,8 @@ func handleQuoteStorageRepair(w http.ResponseWriter, r *http.Request) {
 	})
 	successResponse(w, map[string]string{"task_id": taskID})
 }
+
+func handleQuoteStorageTasks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		errorResponse(w, "只支持GET请求")
 		return

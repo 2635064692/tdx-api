@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -161,7 +162,35 @@ func handleQuoteStorageArchival(w http.ResponseWriter, r *http.Request) {
 	successResponse(w, map[string]string{"task_id": taskID})
 }
 
-func handleQuoteStorageTasks(w http.ResponseWriter, r *http.Request) {
+func handleQuoteStorageRepair(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		errorResponse(w, "只支持POST请求")
+		return
+	}
+	if !quoteStorageReady(w) {
+		return
+	}
+	tradeDate, err := quoteStorageRequestDate(r)
+	if err != nil {
+		errorResponse(w, err.Error())
+		return
+	}
+	intervalSec := 3
+	if v := r.URL.Query().Get("interval"); v != "" {
+		if n, e := strconv.Atoi(v); e == nil && n > 0 {
+			intervalSec = n
+		}
+	}
+	taskID := taskManager.Run("quote-storage-repair", func(ctx context.Context) error {
+		fixed, err := quoteStorageSystem.RepairHistory(ctx, tradeDate, intervalSec)
+		if err != nil {
+			return err
+		}
+		log.Printf("[quote-storage] repair completed: %d records fixed for %s", fixed, tradeDate.Format("2006-01-02"))
+		return nil
+	})
+	successResponse(w, map[string]string{"task_id": taskID})
+}
 	if r.Method != http.MethodGet {
 		errorResponse(w, "只支持GET请求")
 		return

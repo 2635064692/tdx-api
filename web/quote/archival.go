@@ -254,11 +254,7 @@ func mergeLevels(out map[int]*levelAgg, levels []priceLevel, tickTs int64) {
 		if _, ok := levelMap[price]; ok || secondTs <= agg.LastSecondTs {
 			continue
 		}
-		baseTs := agg.LastSecondTs
-		gapSeconds := int((secondTs-baseTs)/1000 - 1)
-		for g := 0; g < gapSeconds; g++ {
-			agg.appendGapNum(baseTs + int64(g+1)*1000)
-		}
+		agg.appendGapNum(secondTs)
 	}
 	for _, level := range levels {
 		agg := out[level.Price]
@@ -437,4 +433,97 @@ func normalizeTradeDate(tradeDate time.Time) time.Time {
 
 func tradeDateKey(tradeDate time.Time) string {
 	return normalizeTradeDate(tradeDate).Format("2006-01-02")
+}
+
+// RepairHistory fixes gap encoding in archived data.
+// When data was archived with per-second gap insertion but collector interval is >1s,
+// gap counts are inflated. This method corrects them to per-observation-period gaps.
+func (a *ArchivalTask) RepairHistory(ctx context.Context, tradeDate time.Time, intervalSec int) (int, error) {
+	if a.db == nil {
+		return 0, nil
+	}
+	var histories []QuoteTickHistory
+	err := a.db.Table(QuoteTickHistory{}.TableName()).
+		Where("DATE(trade_date) = ?", tradeDateKey(tradeDate)).
+		Find(&histories)
+	if err != nil {
+		return 0, err
+	}
+	fixed := 0
+	for i := range histories {
+		select {
+		case <-ctx.Done():
+			return fixed, ctx.Err()
+		default:
+		}
+		changed, err := repairPayload(&histories[i], intervalSec)
+		if err != nil {
+			return fixed, err
+		}
+		if !changed {
+			continue
+		}
+		if _, err := a.db.Table(histories[i].TableName()).
+			Where("id = ?", histories[i].ID).
+			Update(histories[i]); err != nil {
+			return fixed, err
+		}
+		fixed++
+	}
+	return fixed, nil
+}
+
+// repairPayload parses the JSON payload, fixes gap entries, and returns whether any change was made.
+func repairPayload(history *QuoteTickHistory, intervalSec int) (bool, error) {
+	var payload archivalPayload
+	if err := json.Unmarshal([]byte(history.QuoteTicks), &payload); err != nil {
+		return false, err
+	}
+	changed := false
+	for mi := range payload.Minutes {
+		minuteTs := payload.Minutes[mi].Ts
+		levels := make([][]compressedLevel, 2)
+		levels[0] = payload.Minutes[mi].BuyLevel
+		levels[1] = payload.Minutes[mi].SellLevel
+		for _, ll := range levels {
+			for li := range ll {
+				if repairLevelGaps(&ll[li], minuteTs, intervalSec) {
+					changed = true
+				}
+			}
+		}
+	}
+	if !changed {
+		return false, nil
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return false, err
+	}
+	history.QuoteTicks = string(body)
+	return true, nil
+}
+
+// repairLevelGaps fixes gap markers in a single compressedLevel.
+// Returns true if any gap was modified.
+func repairLevelGaps(level *compressedLevel, minuteTs int64, intervalSec int) bool {
+	if intervalSec <= 1 || len(level.Number) == 0 {
+		return false
+	}
+	changed := false
+	for i, v := range level.Number {
+		if v >= -59 && v <= -1 {
+			absGap := -v
+			if (absGap+1)%intervalSec != 0 {
+				continue
+			}
+			correctGap := (absGap + 1) / intervalSec
+			if correctGap == absGap {
+				continue
+			}
+			level.Number[i] = -correctGap
+			changed = true
+		}
+	}
+	return changed
 }

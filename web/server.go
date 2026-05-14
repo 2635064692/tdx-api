@@ -774,6 +774,7 @@ func main() {
 	http.HandleFunc("/api/quote-storage/stop", handleQuoteStorageStop)
 	http.HandleFunc("/api/quote-storage/stats", handleQuoteStorageStats)
 	http.HandleFunc("/api/quote-storage/archival", handleQuoteStorageArchival)
+	http.HandleFunc("/api/quote-storage/repair", handleQuoteStorageRepair)
 	http.HandleFunc("/api/quote-storage/tasks", handleQuoteStorageTasks)
 
 	startQuotePusher()

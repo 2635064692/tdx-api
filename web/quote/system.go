@@ -169,6 +169,10 @@ func (s *QuoteStorageSystem) RunArchival(ctx context.Context, tradeDate time.Tim
 	return s.archival.Run(ctx, tradeDate)
 }
 
+func (s *QuoteStorageSystem) RepairHistory(ctx context.Context, tradeDate time.Time, intervalSec int) (int, error) {
+	return s.archival.RepairHistory(ctx, tradeDate, intervalSec)
+}
+
 func (s *QuoteStorageSystem) Drain(ctx context.Context) error {
 	for len(s.queue) > 0 {
 		select {

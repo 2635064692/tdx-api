@@ -87,7 +87,7 @@ func main() {
 		fmt.Printf("  失败: %v\n", err)
 	} else if len(quotes) > 0 {
 		q := quotes[0]
-		fmt.Printf("  成功: %s%s 最新价=%.2f\n", q.Exchange, q.Code, q.Close.Float64())
+		fmt.Printf("  成功: %s%s 收盘价=%.2f\n", q.Exchange, q.Code, q.K.Close.Float64())
 		fmt.Println("  >>> 对照通过 <<<")
 	}
 }
